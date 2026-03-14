@@ -425,7 +425,8 @@ Transform:
   m_LocalPosition: {x: 0.002, y: 2.09, z: -9.82}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 1712137317}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &330585547
@@ -487,11 +488,18 @@ MonoBehaviour:
   queryInputField: {fileID: 392929358}
   searchButton: {fileID: 794808731}
   statusLabel: {fileID: 1462577581}
-  endpointURL: http://127.0.0.1:8000/get-tag
+  endpointURL: http://127.0.0.1:8000/command
   stopDistance: 1
   heightOffset: 0
   travelDuration: 1.5
   rotationSpeed: 2
+  autoOrbitSpeed: 30
+  orbitMinY: -20
+  orbitMaxY: 80
+  rootObjectsOnly: 0
+  includeTags:
+  - Player
+  highlightColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
 --- !u!1 &392929356
 GameObject:
   m_ObjectHideFlags: 0
@@ -1038,13 +1046,13 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 14
-  m_fontSizeBase: 14
+  m_fontSize: 24
+  m_fontSizeBase: 24
   m_fontWeight: 400
   m_enableAutoSizing: 0
   m_fontSizeMin: 0
   m_fontSizeMax: 0
-  m_fontStyle: 0
+  m_fontStyle: 1
   m_HorizontalAlignment: 1
   m_VerticalAlignment: 256
   m_textAlignment: 65535
@@ -1126,7 +1134,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0}
   m_AnchorMax: {x: 0.5, y: 0}
-  m_AnchoredPosition: {x: -700, y: 15}
+  m_AnchoredPosition: {x: 299, y: 15}
   m_SizeDelta: {x: 160, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &794808731
@@ -1316,6 +1324,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: Nissan_Car
       objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: cf586e96ce53a1d468a76ba566907520, type: 3}
+      propertyPath: m_TagString
+      value: Player
+      objectReference: {fileID: 0}
     - target: {fileID: 5794274613284063216, guid: cf586e96ce53a1d468a76ba566907520, type: 3}
       propertyPath: m_TagString
       value: right_back_wheel
@@ -1411,7 +1423,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0}
   m_AnchorMax: {x: 0.5, y: 0}
-  m_AnchoredPosition: {x: -500, y: 15}
+  m_AnchoredPosition: {x: 473, y: 15}
   m_SizeDelta: {x: 160, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1462577581
@@ -1581,9 +1593,9 @@ Canvas:
   m_GameObject: {fileID: 1712137313}
   m_Enabled: 1
   serializedVersion: 3
-  m_RenderMode: 1
+  m_RenderMode: 0
   m_Camera: {fileID: 330585545}
-  m_PlaneDistance: 1
+  m_PlaneDistance: 0.3
   m_PixelPerfect: 0
   m_ReceivesEvents: 1
   m_OverrideSorting: 0
@@ -1593,7 +1605,7 @@ Canvas:
   m_AdditionalShaderChannelsFlag: 25
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 1
   m_TargetDisplay: 0
 --- !u!224 &1712137317
 RectTransform:
@@ -1610,7 +1622,7 @@ RectTransform:
   - {fileID: 392929357}
   - {fileID: 794808730}
   - {fileID: 1462577580}
-  m_Father: {fileID: 0}
+  m_Father: {fileID: 330585546}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
@@ -1625,5 +1637,4 @@ SceneRoots:
   - {fileID: 410087041}
   - {fileID: 832575519}
   - {fileID: 959420867}
-  - {fileID: 1712137317}
   - {fileID: 167150530}
