@@ -25,8 +25,8 @@ public class CameraNavigator : MonoBehaviour
 
     // ---------------------------------------------------------------
     [Header("Endpoint Settings")]
-    [Tooltip("Full URL of your AI/tag endpoint")]
-    public string endpointURL = "https://your-endpoint.com/api/get-tag";
+    [Tooltip("Full URL of  AI/tag endpoint")]
+    public string endpointURL = "http://127.0.0.1:8000/command";
 
     // ---------------------------------------------------------------
     [Header("Camera Movement")]
@@ -38,11 +38,28 @@ public class CameraNavigator : MonoBehaviour
 
     [Tooltip("Seconds to reach the target (lower = faster)")]
     [Range(0.5f, 10f)]
-    public float travelDuration = 2f;
+    public float travelDuration = 3f;
 
     [Tooltip("Look-at smoothing speed")]
     [Range(1f, 20f)]
     public float rotationSpeed = 5f;
+
+    [Header("Orbit Controls")]
+    public float autoOrbitSpeed = 30f;   // degrees per second
+    public float orbitMinY = -20f;
+    public float orbitMaxY = 80f;
+
+    private Transform orbitTarget;
+    private float orbitYaw;
+    private float orbitPitch = 15f;      // fixed vertical angle
+    private bool isOrbiting = false;
+
+    [Header("Scene Object Settings")]
+    [Tooltip("Only include root-level objects (cleaner list for simple scenes)")]
+    public bool rootObjectsOnly = false;
+
+    [Tooltip("Tags to exclude from scene graph (e.g. UI, EditorOnly)")]
+    public string[] includeTags = { "Player" };
 
     // ---------------------------------------------------------------
     // Private state
@@ -60,6 +77,22 @@ public class CameraNavigator : MonoBehaviour
             searchButton.onClick.AddListener(OnSearchButtonClicked);
 
         SetStatus("Enter a query and press Search.");
+    }
+
+    void Update()
+    {
+        if (!isOrbiting || orbitTarget == null) return;
+
+        // Continuously increment yaw — no input needed
+        orbitYaw += autoOrbitSpeed * Time.deltaTime;
+
+        Quaternion rotation   = Quaternion.Euler(orbitPitch, orbitYaw, 0f);
+        Vector3 orbitPosition = orbitTarget.position
+                            + rotation * new Vector3(0f, 0f, -stopDistance)
+                            + Vector3.up * heightOffset;
+
+        cam.transform.position = orbitPosition;
+        cam.transform.LookAt(orbitTarget.position + Vector3.up * (heightOffset * 0.5f));
     }
 
     // ---------------------------------------------------------------
@@ -87,23 +120,25 @@ public class CameraNavigator : MonoBehaviour
     /// Sends query → gets tag → finds object → moves camera
     private IEnumerator QueryEndpointAndNavigate(string query)
     {
-        SetStatus("Sending query…");
+        SetStatus("Scanning scene…");
         SetButtonInteractable(false);
 
-        // ----- 1. Build request -----
-        string jsonBody = JsonUtility.ToJson(new QueryPayload { query = query });
-        byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonBody);
+        // ----- 1. Collect all scene object names -----
+        string objList = GetSceneObjectNames();
+        Debug.Log($"[CameraNavigator] Scene objects sent: {objList}");
+
+        // ----- 2. Build GET request with query params -----
+        string url = $"{endpointURL}?query={UnityEngine.Networking.UnityWebRequest.EscapeURL(query)}&obj={UnityEngine.Networking.UnityWebRequest.EscapeURL(objList)}";
+
+        SetStatus("Sending query…");
 
         using (UnityEngine.Networking.UnityWebRequest request =
-               new UnityEngine.Networking.UnityWebRequest(endpointURL, "POST"))
+            UnityEngine.Networking.UnityWebRequest.Get(url))
         {
-            request.uploadHandler   = new UnityEngine.Networking.UploadHandlerRaw(bodyRaw);
-            request.downloadHandler = new UnityEngine.Networking.DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json");
-
             yield return request.SendWebRequest();
 
-            // ----- 2. Handle network error -----
+            // ----- 3. Handle network error -----
             if (request.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
             {
                 SetStatus($"Network error: {request.error}");
@@ -111,35 +146,201 @@ public class CameraNavigator : MonoBehaviour
                 yield break;
             }
 
-            // ----- 3. Parse response -----
+            // ----- 4. Parse response -----
             string responseText = request.downloadHandler.text;
-            string tag = ParseTagFromResponse(responseText);
+            Debug.Log($"[CameraNavigator] Response: {responseText}");
 
-            if (string.IsNullOrEmpty(tag))
+            CommandResponse response = ParseCommandResponse(responseText);
+
+            if (response == null || string.IsNullOrEmpty(response.obj))
             {
-                SetStatus("Could not read a tag from the response.");
+                SetStatus("Could not parse a command from the response.");
                 SetButtonInteractable(true);
                 yield break;
             }
 
-            // ----- 4. Find object by tag -----
-            SetStatus($"Looking for tag: \"{tag}\"…");
-            GameObject target = GameObject.FindWithTag(tag);
+            // ----- 5. Find object by name -----
+            SetStatus($"Action: {response.action} → \"{response.obj}\"");
+            GameObject target = GameObject.Find(response.obj);
 
             if (target == null)
             {
-                SetStatus($"No GameObject found with tag \"{tag}\".");
+                SetStatus($"No GameObject found with name \"{response.obj}\".");
                 SetButtonInteractable(true);
                 yield break;
             }
 
-            // ----- 5. Fly to target -----
-            SetStatus($"Navigating to \"{target.name}\"…");
-            yield return StartCoroutine(FlyToTarget(target.transform));
-            SetStatus($"Arrived at \"{target.name}\".");
+            // ----- 6. Dispatch action -----
+            yield return StartCoroutine(DispatchAction(response.action, target));
         }
 
         SetButtonInteractable(true);
+    }
+
+    // ---------------------------------------------------------------
+    /// Collects all GameObject names from the active scene
+    private string GetSceneObjectNames()
+    {
+        System.Collections.Generic.List<string> names = new System.Collections.Generic.List<string>();
+
+        if (rootObjectsOnly)
+        {
+            // Root objects only
+            UnityEngine.SceneManagement.Scene scene =
+                UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+
+            foreach (GameObject go in scene.GetRootGameObjects())
+            {
+                if (IsIncluded(go))
+                    names.Add(go.name);
+            }
+        }
+        else
+        {
+            // Every object in the scene (including children)
+            foreach (GameObject go in FindObjectsOfType<GameObject>())
+            {
+                if (HasIncludedAncestor(go))
+                    names.Add(go.name);
+            }
+        }
+
+        return string.Join(",", names);
+    }
+
+    /// Returns true if the object should be skipped
+    private bool IsIncluded(GameObject go)
+    {
+        foreach (string includeTag in includeTags)
+        {
+            if (!string.IsNullOrEmpty(includeTag) && go.CompareTag(includeTag))
+                return true;
+        }
+        return false;
+    }
+
+    private bool HasIncludedAncestor(GameObject go)
+    {
+        Transform parent = go.transform.parent;
+
+        while (parent != null)
+        {
+            if (IsIncluded(parent.gameObject))
+                return true;
+
+            parent = parent.parent;
+        }
+
+        return false;
+    }
+
+    // ---------------------------------------------------------------
+    /// Parses { "action": "highlight", "object": "wheel_front_left" }
+    private CommandResponse ParseCommandResponse(string json)
+    {
+        try
+        {
+            return JsonUtility.FromJson<CommandResponse>(json);
+        }
+        catch
+        {
+            Debug.LogWarning($"[CameraNavigator] Failed to parse: {json}");
+            return null;
+        }
+    }
+
+    // ---------------------------------------------------------------
+    /// Routes the action string to the correct behaviour
+    private IEnumerator DispatchAction(string action, GameObject target)
+    {
+        // Stop any existing orbit before acting
+        StopOrbit();
+
+        switch (action.ToLower())
+        {
+            case "highlight":
+                HighlightObject(target);
+                SetStatus($"Highlighted \"{target.name}\".");
+                break;
+
+            case "navigate":
+            case "focus":
+                yield return StartCoroutine(FlyToTarget(target.transform));
+                SetStatus($"Arrived at \"{target.name}\".");
+                break;
+            
+            case "move_camera":
+            case "orbit":
+                // Fly to target first, then begin orbiting
+                yield return StartCoroutine(FlyToTarget(target.transform));
+                StartOrbit(target);
+                break;
+
+            case "highlight_and_navigate":
+                HighlightObject(target);
+                yield return StartCoroutine(FlyToTarget(target.transform));
+                SetStatus($"Highlighted and arrived at \"{target.name}\".");
+                break;
+
+            case "highlight_and_orbit":
+                HighlightObject(target);
+                yield return StartCoroutine(FlyToTarget(target.transform));
+                StartOrbit(target);
+                break;
+
+            default:
+                Debug.LogWarning($"[CameraNavigator] Unknown action: {action}");
+                SetStatus($"Unknown action \"{action}\" for \"{target.name}\".");
+                break;
+        }
+    }
+
+    // ---------------------------------------------------------------
+    /// Simple highlight: swaps all Renderer materials to a highlight color.
+    /// Stores originals so can call ClearHighlights() to restore them.
+    [Header("Highlight Settings")]
+    public Color highlightColor = Color.yellow;
+
+    private System.Collections.Generic.Dictionary<Renderer, Material[]> originalMaterials
+        = new System.Collections.Generic.Dictionary<Renderer, Material[]>();
+
+    private void HighlightObject(GameObject target)
+    {
+        ClearHighlights(); // Remove any previous highlight
+
+        foreach (Renderer rend in target.GetComponentsInChildren<Renderer>())
+        {
+            // Store originals
+            originalMaterials[rend] = rend.materials;
+
+            // Apply highlight to every material slot
+            Material[] highlighted = new Material[rend.materials.Length];
+            for (int i = 0; i < highlighted.Length; i++)
+            {
+                highlighted[i] = new Material(rend.materials[i]);
+                highlighted[i].color = highlightColor;
+            }
+            rend.materials = highlighted;
+        }
+    }
+
+    public void ClearHighlights()
+    {
+        foreach (var kvp in originalMaterials)
+        {
+            if (kvp.Key != null)
+                kvp.Key.materials = kvp.Value;
+        }
+        originalMaterials.Clear();
+    }
+
+    // ---------------------------------------------------------------
+    // Serialisable response class
+    [System.Serializable]
+    private class CommandResponse
+    {
+        public string action;
+        public string obj;
     }
 
     // ---------------------------------------------------------------
@@ -180,13 +381,31 @@ public class CameraNavigator : MonoBehaviour
         isTravelling = false;
     }
 
+    private void StartOrbit(GameObject target)
+    {
+        orbitTarget = target.transform;
+
+        // Start yaw from where the camera already is — no jarring snap
+        orbitYaw   = cam.transform.eulerAngles.y;
+        orbitPitch = 15f;  // consistent elevated angle
+
+        isOrbiting = true;
+        SetStatus($"Orbiting \"{target.name}\"…");
+    }
+
+    public void StopOrbit()
+    {
+        isOrbiting  = false;
+        orbitTarget = null;
+    }
+
     // ---------------------------------------------------------------
     // ---- Helpers ---------------------------------------------------
 
     /// <summary>
     /// Parses the tag string out of the JSON response.
     /// Expected format:  { "tag": "Enemy" }
-    /// Adjust if your endpoint returns a different schema.
+    /// Adjust if endpoint returns a different schema.
     /// </summary>
     private string ParseTagFromResponse(string json)
     {
