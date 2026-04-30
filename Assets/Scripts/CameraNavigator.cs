@@ -1,8 +1,12 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.Text;
+using System;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using Newtonsoft.Json;
 
 /// <summary>
 /// CameraNavigator
@@ -150,28 +154,104 @@ public class CameraNavigator : MonoBehaviour
             string responseText = request.downloadHandler.text;
             Debug.Log($"[CameraNavigator] Response: {responseText}");
 
-            CommandResponse response = ParseCommandResponse(responseText);
+            List<CommandResponse> responses = ParseCommandResponse(responseText);
 
-            if (response == null || string.IsNullOrEmpty(response.obj))
+            foreach(var response in responses)
             {
-                SetStatus("Could not parse a command from the response.");
-                SetButtonInteractable(true);
-                yield break;
+                if (response == null || string.IsNullOrEmpty(response.target))
+                {
+                    SetStatus("Could not parse a command from the response.");
+                    SetButtonInteractable(true);
+                    yield break;
+                }
+
+                // ----- 5. Find object by name -----
+                SetStatus($"Action: {response.function} → \"{response.target}\"");
+                GameObject target = GameObject.Find(response.target);
+
+                if (target == null)
+                {
+                    SetStatus($"No GameObject found with name \"{response.target}\".");
+                    SetButtonInteractable(true);
+                    yield break;
+                }
+                
+                // 1. Resolve the component type from string
+                Type componentType = Type.GetType($"UnityEngine.{response.target}, UnityEngine.CoreModule") 
+                  ?? Type.GetType($"UnityEngine.{response.target}, UnityEngine") 
+                  ?? Type.GetType($"UnityEngine.{response.target}, UnityEngine.PhysicsModule")
+                  ?? Type.GetType($"UnityEngine.{response.target}, Assembly-CSharp");
+
+                if (componentType == null)
+                {
+                    SetStatus($"Unknown component: \"{response.target}\".");
+                    SetButtonInteractable(true);
+                    yield break;
+                }
+
+                // 2. Get the component from the GameObject
+                Component component = target.GetComponent(componentType);
+
+                if (component == null)
+                {
+                    SetStatus($"Component \"{response.target}\" not found on \"{target.name}\".");
+                    SetButtonInteractable(true);
+                    yield break;
+                }
+
+                // 3. Find the method by name
+                MethodInfo method = componentType.GetMethod(
+                    response.function,
+                    BindingFlags.Instance | BindingFlags.Public
+                );
+
+                if (method == null)
+                {
+                    SetStatus($"Unknown method: \"{response.function}\" on \"{response.target}\".");
+                    SetButtonInteractable(true);
+                    yield break;
+                }
+
+                if (method.Name == "FlyToTarget")
+                {
+                    FlyToTarget(target.transform);
+                    SetButtonInteractable(true);
+                    yield break;
+                }
+
+                if (method.Name == "StartOrbit")
+                {
+                    StartOrbit(target);
+                    SetButtonInteractable(true);
+                    yield break;
+                }
+
+                // 4. Match dictionary args to method parameters by name
+                ParameterInfo[] parameters = method.GetParameters();
+                object[] convertedArgs = new object[parameters.Length];
+
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    string paramName = parameters[i].Name;
+                    Type paramType = parameters[i].ParameterType;
+
+                    if (!response.args.TryGetValue(paramName, out string value))
+                    {
+                        SetStatus($"Missing argument \"{paramName}\" for \"{response.function}\".");
+                        SetButtonInteractable(true);
+                        yield break;
+                    }
+
+                    // Convert to the expected type
+                    convertedArgs[i] = Convert.ChangeType(value, paramType);
+                }
+
+                method.Invoke(component, convertedArgs);
+                yield return new WaitForSeconds(0.5f);
+                // ----- 6. Dispatch action -----
+                // yield return StartCoroutine(DispatchAction(response.action, target));
             }
-
-            // ----- 5. Find object by name -----
-            SetStatus($"Action: {response.action} → \"{response.obj}\"");
-            GameObject target = GameObject.Find(response.obj);
-
-            if (target == null)
-            {
-                SetStatus($"No GameObject found with name \"{response.obj}\".");
-                SetButtonInteractable(true);
-                yield break;
-            }
-
-            // ----- 6. Dispatch action -----
-            yield return StartCoroutine(DispatchAction(response.action, target));
+            
         }
 
         SetButtonInteractable(true);
@@ -198,7 +278,7 @@ public class CameraNavigator : MonoBehaviour
         else
         {
             // Every object in the scene (including children)
-            foreach (GameObject go in FindObjectsOfType<GameObject>())
+            foreach (GameObject go in FindObjectsByType<GameObject>(FindObjectsSortMode.None))
             {
                 if (HasIncludedAncestor(go))
                     names.Add(go.name);
@@ -236,11 +316,12 @@ public class CameraNavigator : MonoBehaviour
 
     // ---------------------------------------------------------------
     /// Parses { "action": "highlight", "object": "wheel_front_left" }
-    private CommandResponse ParseCommandResponse(string json)
+    private List<CommandResponse> ParseCommandResponse(string json)
     {
         try
         {
-            return JsonUtility.FromJson<CommandResponse>(json);
+            // return JsonUtility.FromJson<CommandResponse>(json);
+            return JsonConvert.DeserializeObject<List<CommandResponse>>(json);
         }
         catch
         {
@@ -337,10 +418,14 @@ public class CameraNavigator : MonoBehaviour
     // ---------------------------------------------------------------
     // Serialisable response class
     [System.Serializable]
-    private class CommandResponse
+    public class CommandResponse
     {
-        public string action;
-        public string obj;
+        public string function;
+        public string target;
+        public Dictionary<string, string> args;
+        public string instruction;
+        public int priority;
+        public float confidence;
     }
 
     // ---------------------------------------------------------------
