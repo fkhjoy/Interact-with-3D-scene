@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using Newtonsoft.Json;
+using System.Linq;
 
 /// <summary>
 /// CameraNavigator
@@ -176,19 +177,41 @@ public class CameraNavigator : MonoBehaviour
                     yield break;
                 }
                 
-                // 1. Resolve the component type from string
-                Type componentType = Type.GetType($"UnityEngine.{response.target}, UnityEngine.CoreModule") 
-                  ?? Type.GetType($"UnityEngine.{response.target}, UnityEngine") 
-                  ?? Type.GetType($"UnityEngine.{response.target}, UnityEngine.PhysicsModule")
-                  ?? Type.GetType($"UnityEngine.{response.target}, Assembly-CSharp");
+                if (response.function == "FlyToTarget")
+                {
+                    StopOrbit();
+                    StartCoroutine(FlyToTarget(target.transform));
+                    SetButtonInteractable(true);
+                    yield break;
+                }
 
+                if (response.function == "StartOrbit")
+                {
+                    StartOrbit(target);
+                    SetButtonInteractable(true);
+                    yield break;
+                }
+                
+
+                // Type componentType = AppDomain.CurrentDomain.GetAssemblies()
+                //     .SelectMany(a => a.GetTypes())
+                //     .FirstOrDefault(t => t.Name == response.target);
+                string[] parts = response.function.Split('.');
+                string componentName = parts[0];
+                string methodName = parts[1];
+                
+                // 1. Resolve the component type from string
+                Type componentType = Type.GetType($"UnityEngine.{componentName}, UnityEngine.CoreModule") 
+                  ?? Type.GetType($"UnityEngine.{componentName}, UnityEngine") 
+                  ?? Type.GetType($"UnityEngine.{componentName}, UnityEngine.PhysicsModule")
+                  ?? Type.GetType($"UnityEngine.{componentName}, Assembly-CSharp");
                 if (componentType == null)
                 {
                     SetStatus($"Unknown component: \"{response.target}\".");
                     SetButtonInteractable(true);
                     yield break;
                 }
-
+                Debug.Log($"[CameraNavigator] Resolved component type: {componentType.FullName}");
                 // 2. Get the component from the GameObject
                 Component component = target.GetComponent(componentType);
 
@@ -200,10 +223,8 @@ public class CameraNavigator : MonoBehaviour
                 }
 
                 // 3. Find the method by name
-                MethodInfo method = componentType.GetMethod(
-                    response.function,
-                    BindingFlags.Instance | BindingFlags.Public
-                );
+                MethodInfo method = componentType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                    .FirstOrDefault(m => m.Name == methodName && m.GetParameters().Length == response.args.Count);
 
                 if (method == null)
                 {
@@ -212,19 +233,7 @@ public class CameraNavigator : MonoBehaviour
                     yield break;
                 }
 
-                if (method.Name == "FlyToTarget")
-                {
-                    FlyToTarget(target.transform);
-                    SetButtonInteractable(true);
-                    yield break;
-                }
-
-                if (method.Name == "StartOrbit")
-                {
-                    StartOrbit(target);
-                    SetButtonInteractable(true);
-                    yield break;
-                }
+                
 
                 // 4. Match dictionary args to method parameters by name
                 ParameterInfo[] parameters = method.GetParameters();
@@ -248,6 +257,7 @@ public class CameraNavigator : MonoBehaviour
 
                 method.Invoke(component, convertedArgs);
                 yield return new WaitForSeconds(0.5f);
+                StopOrbit();
                 // ----- 6. Dispatch action -----
                 // yield return StartCoroutine(DispatchAction(response.action, target));
             }

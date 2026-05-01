@@ -1328,6 +1328,10 @@ PrefabInstance:
       propertyPath: m_TagString
       value: Player
       objectReference: {fileID: 0}
+    - target: {fileID: 3137388108948950876, guid: cf586e96ce53a1d468a76ba566907520, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0.7884119
+      objectReference: {fileID: 0}
     - target: {fileID: 5794274613284063216, guid: cf586e96ce53a1d468a76ba566907520, type: 3}
       propertyPath: m_TagString
       value: right_back_wheel
